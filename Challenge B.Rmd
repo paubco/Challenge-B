@@ -1,0 +1,194 @@
+---
+title: "Intermediate Econometrics Homework"
+author: "Alexis Naudin & Pau Barba"
+date: "22/11/2017"
+github: https://github.com/paubco
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r ins, eval = F}
+install.packages("caret")
+install.packages("tidyverse")
+install.packages("neuralnet")
+install.package("np")
+istall.package("dplyr")
+install.package("caret")
+install.packages("knitr")
+```
+
+###Exercise 1
+
+####Step 1:Neural networks
+In this exercise we will be using a neural network in order to estimate the regression. A neural network is a set of artificial neurons which take inputs and outputs, each neurons are connected by weighted connections. A particular network multiplies the value of the connection by the value of the neuron and applies a function before passing it to the next layer of neurons. Machine learnig fits a set of neurons and weights which best predict the output of the training data, and then use it to preduct the test data. 
+
+Firt off we  clean the data by eliminating the missing values. Then we proceed to eliminate the data which is far from beeing significative in an ols, in order to not overcrowd the imputs with irrelevant data, which whould make it more difficut to establish correct relations. We do that by filtering out all the variables which have a p-value of 10% or higher on a standard OLS regression.
+
+```{r , include = F}
+set.seed(1234567890)
+library(lmtest)
+library(tidyverse)
+library(nnet)
+library(np)
+library(dplyr)
+library(caret)
+library(knitr)
+TRAIN<-read.csv("train.csv", header = T, dec = ",")
+TEST<-read.csv("test.csv", header = T, dec = ",")
+```
+
+```{r Cleaning data, include = FALSE}
+#checking for missing values
+apply(TRAIN,2,function(x) sum(is.na(x)))
+#eliminagting variables with too many missing obs:
+TRAIN<- TRAIN[,(!names(TRAIN)%in%c("LotFrontage","Alley","PoolQC","FireplaceQu", "Fence", "MiscFeature"))]
+TEST<- TEST[,(!names(TEST)%in%c("LotFrontage","Alley","PoolQC","FireplaceQu", "Fence", "MiscFeature"))]
+#eliminating mising values
+TRAIN <- TRAIN[complete.cases(TRAIN),]
+TEST <- TEST[complete.cases(TEST),]
+apply(TRAIN,2,function(x) sum(is.na(x)))
+#checking for missing values
+#ITS CLEAN!it only took 4 hours!
+
+#dropping non significant variables to not overcrowd the network
+REG <- lm(SalePrice ~., data= TRAIN)
+SIG<- coeftest(REG)
+SIG <- SIG[1:224 , 4]
+SIG <- SIG[which(SIG<0.1)] #selecting significant variables
+TRAIN<- TRAIN[,names(TRAIN)%in%c(names(SIG), "SalePrice")]#eliminating non sig
+#i feel pretty proud of this last lines
+
+```
+
+####Step 2: Training the model
+
+We train the model with the training data with a neural network of 40 neurons,  with the possibility to skip a layer. 
+```{r step 2, echo= FALSE}
+#fitting a neural network model
+NET <- nnet(SalePrice~., data = TRAIN, size= 40, linout = TRUE, skip = TRUE)
+```
+####Step 3: Predicting with the model
+
+Last, we use both the neural network and a standard OLS to predict the results of the regression. In order to compare both results we two different graphs:
+
+The first one plots the prediction of the linear results versus that of the neural net prediction.If the two methods were equal we would see a perfect 40 degree line. In this particlar seed we se that there seem to be two different trends in the graph, that could indicate that one of the two methods has found a relation in a particular variable that the other one has missed, which brings the price up. 
+
+The second one plots the differene of the two predictions and we can see a similar result. On some cases the neural net predics values above whilst in some others it predicts below, but the deviations seem to be consistent, which seems to indicate different weights for  particular variables.
+
+\* note this seed is rather particular, and we see this double trend effect. Under most seeds the linear prediction is constantly higher which leads to a difference graph biased downwards. 
+
+
+```{r step 3, echo = F}
+NP <-as.tibble(predict(NET,TEST, "raw"))
+
+REG <- lm(SalePrice ~., data= TRAIN)
+LP <-as.tibble(predict(REG,TEST))
+DIF <- NP - LP
+N <- (1:1319)
+
+RES <- data.frame(N, NP, LP, DIF)
+names(RES) <- c("N", "NetPrediction", "LinearPrediction", "Difference")
+
+ggplot(RES)+geom_point(data = RES,aes(x = LinearPrediction, y= NetPrediction), colour= "seagreen")
+
+
+ggplot(RES)+geom_line(data = RES,aes(x = N, y= Difference), colour= "seagreen")
+```
+
+ 
+
+
+###Exercise 2
+
+First we generate the data and create a partition for the training and the testing data.Next we fit the model with low and high flexibility.
+
+```{r echo = F}
+x <-rnorm(150)
+e <-rnorm(150)
+y <-x^3+e
+data <-data.frame(x,y)
+
+train_index<-createDataPartition(data$x,p=0.785,list=F) 
+train<-slice(data,train_index)
+test<-slice(data,-train_index)
+
+ll.fit.lowflex<- npreg(y~x, data = train, bws = 0.5, method = "ll")
+ll.fit.lowflex<- data.frame(fitted(ll.fit.lowflex))
+
+
+ll.fit.highflex<- npreg(y~x, data = train, bws = 0.01, method = "ll")
+ll.fit.highflex<- data.frame(fitted(ll.fit.highflex))
+```
+
+
+When we plot the data we observe that the high flexibility model is much more variant. We can see that the low flexibility model has more  bias since the other one has a much better fit for this particular data.
+```{r, echo = F}
+ggplot(train)+geom_point(aes(x=x, y=y), colour = "BLACK")+geom_line(aes(x=x, y= ll.fit.lowflex), colour = "mediumorchid4")+geom_line(aes(x=x, y= ll.fit.highflex), colour = "seagreen")
+```
+
+We plot the test data and we see that this time the high flexibility model still has more variance, but it also has a higher bias since it is overfited to the training data and does not reflect on the test data.
+```{r echo = F}
+ggplot(test)+geom_point(aes(x=x, y=y), colour = "BLACK")+geom_line(data = train, aes(x=x, y= ll.fit.lowflex), colour = "mediumorchid4")+geom_line(data = train, aes(x=x, y= ll.fit.highflex), colour = "seagreen")
+
+```
+
+####Checking Mean Square Error
+
+First we create a vector for the bandwidth
+
+```{r BDW, echo = F}
+BDW <-seq(0.01,0.5, 0.001)
+```
+
+We then create two empty matrix which will store the residuals for both models.Then we make a loop which runs the regression for both data sets and stores the residuals in the matrix.
+```{r MSE setup, echo =  F}
+restrain <- matrix(nrow = length(BDW), ncol= 120)
+restest <- matrix(nrow = length(BDW), ncol= 120)
+
+for(i in 1:length(BDW)){
+  reg <- npreg(y~x, data = train, bws = BDW[i], method = "ll")
+  restrain[i,] <- train$y - predict(reg)
+  restest[i,] <- train$y - predict(reg, newdata = test)
+}
+```
+
+We then compute the mean squared error, by doing the mean of the matrix rows, we are then left the mean residuals for the regressions which we can square to obtain the mean squared error.
+
+```{r MSE comput, echo = F}
+MSETRAIN <- rowMeans(((restrain)^2), na.rm = FALSE, dims = 1)
+
+MSETEST <- rowMeans(((restest)^2), na.rm = FALSE, dims = 1)
+
+FRAME <- data.frame(MSETRAIN, MSETEST, BDW)
+```
+
+We proceed to plot the data. The data for the train variable appears in green, while the one for the test data appears in purple. First off we can see that the train errors are always going to be lower since we are using the actual data, and since it's the actual data there is no risk of over fitting therefore the best model is going to be the most flexible (lowest bandwith). In the train model we can see that the shape is more interesting, the lowest poit seems to be arround 0.6, lower flexibility increases error due to less acurate preddictions, but more flexivility also increases error since it runs the risk of overfitting the data.
+
+```{r MSE plot, echo= F}
+ggplot(FRAME)+geom_line(aes(x = BDW, y = MSETRAIN ), colour = "seagreen")+geom_line(aes(x = BDW, y = MSETEST ), colour = "mediumorchid4")
+```
+
+###Task3
+
+In this exercise we download the data sets (we will be using a freduced version of the SIREN dataset because it melted one of our computers and crashed the other one), load them and merge them by their SIREN number.Then we plot the histogram for the size of the variables which were in CNIL. (note that by size we understood CATEGORIE which refers to the categorical classification of the company by size)
+```{r, echo = F}
+CNIL<-read.csv2("OpenCNIL_Organismes_avec_CIL_VD_20171204.csv", header = T)
+as.tibble(CNIL)
+
+SIRC<- read.csv2("sirc-17804_9075_14209_201710_L_M_20171101_030132835.csv", header = T)
+
+```
+
+```{r, echo = F}
+SUBS <- data.frame(table(substr(CNIL$Code_Postal,1,2)))
+```
+
+```{r, echo = F}
+MER <- merge(CNIL, SIRC, by.x = "ï..Siren", by.y = "SIREN", all = F)
+M<-distinct(MER,ï..Siren,CATEGORIE)
+
+ggplot(data = M, aes(CATEGORIE))+geom_histogram(colour = "seagreen", stat = "count")
+```
